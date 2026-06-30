@@ -31,6 +31,9 @@ pnpm-debug.log*
 # env files
 .env*.local
 
+# yt-dlp temp downloads (never commit)
+/downloads
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

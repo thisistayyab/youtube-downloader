@@ -2,12 +2,14 @@ import { NextResponse } from "next/server"
 
 import type { FetchInfoRequest } from "@/lib/ytdlp-types"
 import { isValidYoutubeUrl } from "@/lib/ytdlp-utils"
+import { assertSelfHostedRuntime } from "@/lib/runtime-environment"
 import { fetchVideoInfo, YtdlpError } from "@/lib/ytdlp-runner"
 
 export const runtime = "nodejs"
 
 export async function POST(request: Request) {
   try {
+    assertSelfHostedRuntime()
     const body = (await request.json()) as FetchInfoRequest
     const url = body.url?.trim()
 

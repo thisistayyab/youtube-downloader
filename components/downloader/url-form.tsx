@@ -13,9 +13,15 @@ interface UrlFormProps {
   onFetch: (url: string) => Promise<void>
   isLoading: boolean
   error: string | null
+  disabled?: boolean
 }
 
-export function UrlForm({ onFetch, isLoading, error }: UrlFormProps) {
+export function UrlForm({
+  onFetch,
+  isLoading,
+  error,
+  disabled = false,
+}: UrlFormProps) {
   const [url, setUrl] = useState("")
 
   async function handleSubmit(e: React.FormEvent) {
@@ -41,12 +47,12 @@ export function UrlForm({ onFetch, isLoading, error }: UrlFormProps) {
             value={url}
             onChange={(e) => setUrl(e.target.value)}
             aria-invalid={isInvalid}
-            disabled={isLoading}
+            disabled={isLoading || disabled}
             className="h-10 flex-1"
           />
           <Button
             type="submit"
-            disabled={!url.trim() || isInvalid || isLoading}
+            disabled={!url.trim() || isInvalid || isLoading || disabled}
             className="h-10 shrink-0 bg-red-600 hover:bg-red-700 dark:bg-red-600 dark:hover:bg-red-700"
           >
             {isLoading ? (
@@ -63,10 +69,14 @@ export function UrlForm({ onFetch, isLoading, error }: UrlFormProps) {
           </Button>
         </div>
         <p className="text-xs text-muted-foreground">
-          Supports videos, Shorts, and playlists. Uses yt-dlp{" "}
-          <code className="rounded bg-muted px-1 py-0.5 font-mono text-[0.7rem]">
-            --dump-json
-          </code>
+          {disabled
+            ? "Install yt-dlp and ffmpeg first — see the PC Setup guide."
+            : "Supports videos, Shorts, and playlists. Uses yt-dlp "}
+          {!disabled ? (
+            <code className="rounded bg-muted px-1 py-0.5 font-mono text-[0.7rem]">
+              --dump-json
+            </code>
+          ) : null}
         </p>
       </div>
 

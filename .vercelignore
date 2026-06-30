@@ -1,0 +1,14 @@
+# Local dev / secrets (never deploy)
+.env
+.env.local
+.env.*.local
+
+# yt-dlp temp downloads
+downloads/
+
+# Editor & OS
+.DS_Store
+*.log
+
+# Optional: agent script is for Windows PC only, not needed on Vercel build
+# scripts/

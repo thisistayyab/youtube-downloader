@@ -1,5 +1,5 @@
-import { DownloaderApp } from "@/components/downloader/downloader-app"
+import { HomePage } from "@/components/downloader/home-page"
 
 export default function Page() {
-  return <DownloaderApp />
+  return <HomePage />
 }

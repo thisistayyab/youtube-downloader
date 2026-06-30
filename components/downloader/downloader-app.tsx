@@ -1,7 +1,8 @@
 "use client"
 
 import { Download, Loader2 } from "lucide-react"
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
+import { toast } from "sonner"
 
 import { AdvancedOptions } from "@/components/downloader/advanced-options"
 import { DownloadOptionsPanel } from "@/components/downloader/download-options-panel"
@@ -9,6 +10,10 @@ import { DownloadQueue } from "@/components/downloader/download-queue"
 import { DownloaderHeader } from "@/components/downloader/header"
 import { FormatSelector } from "@/components/downloader/format-selector"
 import { LegalNotice } from "@/components/downloader/legal-notice"
+import {
+  ToolSetupBanner,
+  useToolSetupToasts,
+} from "@/components/downloader/tool-setup-notice"
 import { UrlForm } from "@/components/downloader/url-form"
 import { VideoPreview } from "@/components/downloader/video-preview"
 import { Button } from "@/components/ui/button"
@@ -20,6 +25,8 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
+import type { AppCapabilities } from "@/lib/capabilities"
+import { apiFetch } from "@/lib/api-client"
 import type {
   DownloadJob,
   DownloadOptions,
@@ -109,8 +116,15 @@ function parseContentDispositionFilename(header: string | null): string | null {
   return null
 }
 
-async function saveJobFile(job: DownloadJob): Promise<string | null> {
-  const res = await fetch(`/api/jobs/${job.id}/file`, { cache: "no-store" })
+async function saveJobFile(
+  job: DownloadJob,
+  apiBaseUrl?: string | null
+): Promise<string | null> {
+  const res = await apiFetch(
+    `/api/jobs/${job.id}/file`,
+    { cache: "no-store" },
+    apiBaseUrl
+  )
 
   if (!res.ok) {
     const data = (await res.json().catch(() => null)) as { error?: string } | null
@@ -132,7 +146,18 @@ async function saveJobFile(job: DownloadJob): Promise<string | null> {
   return null
 }
 
-export function DownloaderApp() {
+export function DownloaderApp({
+  capabilities = null,
+  apiBaseUrl = null,
+  agentStatus = null,
+}: {
+  capabilities?: AppCapabilities | null
+  apiBaseUrl?: string | null
+  agentStatus?: ReactNode
+}) {
+  useToolSetupToasts(capabilities ?? null)
+
+  const toolsReady = capabilities?.ytdlp.available && capabilities?.ffmpeg.available
   const [url, setUrl] = useState("")
   const [videoInfo, setVideoInfo] = useState<YtdlpVideoInfo | null>(null)
   const [isFetching, setIsFetching] = useState(false)
@@ -159,7 +184,11 @@ export function DownloaderApp() {
 
       const timer = setInterval(async () => {
         try {
-          const res = await fetch(`/api/jobs/${jobId}`, { cache: "no-store" })
+          const res = await apiFetch(
+            `/api/jobs/${jobId}`,
+            { cache: "no-store" },
+            apiBaseUrl
+          )
           const data = (await res.json()) as DownloadProgressEvent & {
             error?: string
           }
@@ -207,7 +236,7 @@ export function DownloaderApp() {
 
       pollTimers.current.set(jobId, timer)
     },
-    [stopPolling]
+    [stopPolling, apiBaseUrl]
   )
 
   useEffect(() => {
@@ -226,11 +255,15 @@ export function DownloaderApp() {
     setUrl(inputUrl)
 
     try {
-      const res = await fetch("/api/info", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: inputUrl }),
-      })
+      const res = await apiFetch(
+        "/api/info",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: inputUrl }),
+        },
+        apiBaseUrl
+      )
 
       const data = await res.json()
 
@@ -248,11 +281,27 @@ export function DownloaderApp() {
       }))
     } catch (err) {
       setVideoInfo(null)
-      setFetchError(err instanceof Error ? err.message : "Something went wrong")
+      const message =
+        err instanceof Error ? err.message : "Something went wrong"
+      setFetchError(message)
+      if (
+        message.toLowerCase().includes("yt-dlp") ||
+        message.toLowerCase().includes("ffmpeg")
+      ) {
+        toast.error("Required tool not set up", {
+          description: message,
+          action: {
+            label: "PC Setup",
+            onClick: () => {
+              window.location.href = "/setup"
+            },
+          },
+        })
+      }
     } finally {
       setIsFetching(false)
     }
-  }, [])
+  }, [apiBaseUrl])
 
   const handleDownload = useCallback(async () => {
     if (!videoInfo || isStartingDownload) return
@@ -260,21 +309,25 @@ export function DownloaderApp() {
     setIsStartingDownload(true)
 
     try {
-      const res = await fetch("/api/download", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          url,
-          videoInfo: {
-            id: videoInfo.id,
-            title: videoInfo.title,
-            thumbnail: videoInfo.thumbnail,
-            webpage_url: videoInfo.webpage_url,
-            upload_date: videoInfo.upload_date,
-          },
-          options,
-        }),
-      })
+      const res = await apiFetch(
+        "/api/download",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            url,
+            videoInfo: {
+              id: videoInfo.id,
+              title: videoInfo.title,
+              thumbnail: videoInfo.thumbnail,
+              webpage_url: videoInfo.webpage_url,
+              upload_date: videoInfo.upload_date,
+            },
+            options,
+          }),
+        },
+        apiBaseUrl
+      )
 
       const data = await res.json()
 
@@ -315,15 +368,15 @@ export function DownloaderApp() {
     } finally {
       setIsStartingDownload(false)
     }
-  }, [videoInfo, url, options, isStartingDownload, pollJob])
+  }, [videoInfo, url, options, isStartingDownload, pollJob, apiBaseUrl])
 
   const handleRemoveJob = useCallback(
     (jobId: string) => {
       stopPolling(jobId)
       setJobs((prev) => prev.filter((job) => job.id !== jobId))
-      void fetch(`/api/jobs/${jobId}`, { method: "DELETE" })
+      void apiFetch(`/api/jobs/${jobId}`, { method: "DELETE" }, apiBaseUrl)
     },
-    [stopPolling]
+    [stopPolling, apiBaseUrl]
   )
 
   useEffect(() => {
@@ -343,9 +396,17 @@ export function DownloaderApp() {
             <strong className="font-medium text-foreground">1080p MP4 + AAC</strong>{" "}
             (~200 MB at 1080p). For 4K SDR (~190 MB) use Custom →{" "}
             <strong className="font-medium text-foreground">4K SDR MP4 + AAC</strong>.
-            4K HDR is ~380 MB.
+            4K HDR is ~380 MB.{" "}
+            <a
+              href="/setup"
+              className="font-medium text-foreground underline underline-offset-2"
+            >
+              PC setup guide
+            </a>
           </p>
           <LegalNotice />
+          {agentStatus}
+          <ToolSetupBanner capabilities={capabilities ?? null} />
         </section>
 
         <div className="grid gap-6 lg:grid-cols-5">
@@ -362,6 +423,7 @@ export function DownloaderApp() {
                   onFetch={handleFetch}
                   isLoading={isFetching}
                   error={fetchError}
+                  disabled={capabilities !== null && !toolsReady}
                 />
               </CardContent>
             </Card>
@@ -421,7 +483,7 @@ export function DownloaderApp() {
             <VideoPreview info={videoInfo} isLoading={isFetching} />
             <DownloadQueue
               jobs={jobs}
-              onSaveFile={saveJobFile}
+              onSaveFile={(job) => saveJobFile(job, apiBaseUrl)}
               onRemove={handleRemoveJob}
               onClearCompleted={() =>
                 setJobs((prev) => prev.filter((job) => job.status !== "completed"))

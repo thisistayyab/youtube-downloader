@@ -3,12 +3,14 @@ import { NextResponse } from "next/server"
 import { startJob } from "@/lib/job-store"
 import type { StartDownloadRequest, StartDownloadResponse } from "@/lib/ytdlp-types"
 import { decodeYoutubeTitle, isValidYoutubeUrl } from "@/lib/ytdlp-utils"
+import { assertSelfHostedRuntime } from "@/lib/runtime-environment"
 import { ensureYtdlpAvailable, ensureFfmpegAvailable, YtdlpError, buildYtdlpArgs } from "@/lib/ytdlp-runner"
 
 export const runtime = "nodejs"
 
 export async function POST(request: Request) {
   try {
+    assertSelfHostedRuntime()
     const body = (await request.json()) as StartDownloadRequest
     const url = body.url?.trim()
 

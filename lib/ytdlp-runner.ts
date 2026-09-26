@@ -72,14 +72,22 @@ export function getFfmpegExecutable(): string {
   return fs.existsSync(candidate) ? candidate : location
 }
 
-/** Resolves cookies file from env var path, raw env string, or ./cookies.txt */
+/** Resolves cookies file from env var path, Render secret file, raw env string, or ./cookies.txt */
 export function getCookiesPath(): string | undefined {
+  // 1. Explicit path in environment variable
   const envPath =
     process.env.COOKIES_PATH?.trim() || process.env.YTDLP_COOKIES_PATH?.trim()
   if (envPath && fs.existsSync(envPath)) {
     return path.resolve(envPath)
   }
 
+  // 2. Render Secret File default mount path (/etc/secrets/cookies.txt)
+  const renderSecretCookies = "/etc/secrets/cookies.txt"
+  if (fs.existsSync(renderSecretCookies)) {
+    return renderSecretCookies
+  }
+
+  // 3. Raw cookies string passed via environment variable (for small/filtered cookies)
   const envContent =
     process.env.YOUTUBE_COOKIES?.trim() || process.env.YTDLP_COOKIES?.trim()
   if (envContent) {
@@ -94,6 +102,7 @@ export function getCookiesPath(): string | undefined {
     }
   }
 
+  // 4. Local cookies.txt in workspace root
   const localCookies = path.join(process.cwd(), "cookies.txt")
   if (fs.existsSync(localCookies)) {
     return localCookies
@@ -613,11 +622,11 @@ export function tryManualMerge(
 
 export function sanitizeYtdlpMessage(message: string): string {
   if (
-    /Sign in to confirm you’re not a bot|Sign in to confirm you're not a bot/i.test(
+    /Sign in to confirm you’re not a bot|Sign in to confirm you're not a bot|Failed to extract any player response/i.test(
       message
     )
   ) {
-    return "YouTube bot verification triggered: YouTube requires authentication for this video/IP. Provide cookies via a cookies.txt file or the YOUTUBE_COOKIES environment variable."
+    return "YouTube bot verification triggered (Cloud IP blocked by YouTube). Set the YOUTUBE_COOKIES environment variable in Render Dashboard with your cookies.txt to authenticate."
   }
 
   const lines = message

@@ -253,6 +253,8 @@ export async function fetchVideoInfo(url: string): Promise<YtdlpVideoInfo> {
       "node",
       "--remote-components",
       "ejs:github",
+      "--extractor-args",
+      "youtube:player_client=default,ios,android",
     ]
 
     const cookiesPath = getCookiesPath()
@@ -325,6 +327,8 @@ export function buildYtdlpArgs(
     "node",
     "--remote-components",
     "ejs:github",
+    "--extractor-args",
+    "youtube:player_client=default,ios,android",
     "--retries",
     "3",
     "--fragment-retries",
@@ -622,11 +626,11 @@ export function tryManualMerge(
 
 export function sanitizeYtdlpMessage(message: string): string {
   if (
-    /Sign in to confirm you’re not a bot|Sign in to confirm you're not a bot|Failed to extract any player response/i.test(
+    /Sign in to confirm you’re not a bot|Sign in to confirm you're not a bot|Failed to extract any player response|The page needs to be reloaded/i.test(
       message
     )
   ) {
-    return "YouTube bot verification triggered (Cloud IP blocked by YouTube). Set the YOUTUBE_COOKIES environment variable in Render Dashboard with your cookies.txt to authenticate."
+    return "YouTube bot verification triggered: This cloud server IP was challenged by YouTube. Add a clean cookies.txt as a Secret File in Render Dashboard (Environment -> Secret Files) to authenticate."
   }
 
   const lines = message

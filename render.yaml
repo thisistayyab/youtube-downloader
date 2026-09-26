@@ -4,7 +4,7 @@ services:
   - type: web
     name: youtube-downloader
     runtime: node
-    plan: standard # 1 GB / 1 CPU — required for 4K transcoding; starter works for 1080p
+    plan: free # 512 MB / Shared CPU — 100% Free tier ($0/mo)
     region: oregon # change to your closest region: oregon | ohio | virginia | frankfurt | singapore
     buildCommand: npm ci && npm run setup:binaries -- --with-ffmpeg && npm run build
     startCommand: npm start
@@ -34,9 +34,9 @@ services:
       # Max idle time during an ffmpeg merge before retry (default 5 min).
       - key: PROCESSING_TIMEOUT_MS
         value: "300000"
-      # Parallel yt-dlp/ffmpeg jobs allowed on the instance. Lower = faster each.
+      # Parallel yt-dlp/ffmpeg jobs allowed on the instance. Kept at 1 for 512MB Free Tier.
       - key: MAX_CONCURRENT_JOBS
-        value: "2"
+        value: "1"
       # Per-IP rate limits to protect the instance.
       - key: RATE_LIMIT_INFO_PER_MIN
         value: "20"

@@ -33,7 +33,10 @@ interface DownloadQueueProps {
 
 const STATUS_CONFIG: Record<
   DownloadStatus,
-  { label: string; variant: "default" | "secondary" | "destructive" | "outline" }
+  {
+    label: string
+    variant: "default" | "secondary" | "destructive" | "outline"
+  }
 > = {
   queued: { label: "Queued", variant: "secondary" },
   fetching: { label: "Fetching", variant: "secondary" },
@@ -171,10 +174,11 @@ function QueueItem({
             <Progress
               value={job.status === "processing" ? 99 : job.progress}
               className={`h-1.5 ${job.status === "processing" ? "animate-pulse" : ""}`}
-            /><div className="flex justify-between text-[0.65rem] text-muted-foreground">
+            />
+            <div className="flex justify-between text-[0.65rem] text-muted-foreground">
               <span className="line-clamp-1 pr-2">
                 {job.status === "processing"
-                  ? job.processingPhase ?? "Processing…"
+                  ? (job.processingPhase ?? "Processing…")
                   : `${job.progress.toFixed(0)}%`}
               </span>
               {job.status === "downloading" && (
@@ -199,28 +203,46 @@ function QueueItem({
                 {job.filePath}
               </p>
             )}
-            <Button
-              size="xs"
-              variant="outline"
-              disabled={isSaving || job.fileReady === false}
-              onClick={handleSave}
-            >
-              {isSaving ? (
-                <>
-                  <Loader2 className="animate-spin" />
-                  Saving…
-                </>
-              ) : (
-                <>
-                  <Download />
-                  Save file
-                </>
-              )}
-            </Button>
-            {job.fileReady === false && !saveError && (
+            {job.autoSaved ? (
               <p className="text-xs text-muted-foreground">
-                File missing on server. Download again.
+                Saved to your device — check your browser&apos;s Downloads
+                folder.
               </p>
+            ) : job.fileReady === false ? (
+              <p className="text-xs text-muted-foreground">
+                File is no longer on the server. Run the download again to save
+                it.
+              </p>
+            ) : (
+              <Button
+                size="xs"
+                variant="outline"
+                disabled={isSaving}
+                onClick={handleSave}
+              >
+                {isSaving ? (
+                  <>
+                    <Loader2 className="animate-spin" />
+                    Saving…
+                  </>
+                ) : (
+                  <>
+                    <Download />
+                    Save file
+                  </>
+                )}
+              </Button>
+            )}
+            {job.autoSaved && (
+              <Button
+                size="xs"
+                variant="ghost"
+                disabled={isSaving}
+                onClick={handleSave}
+              >
+                {isSaving ? <Loader2 className="animate-spin" /> : null}
+                Save again
+              </Button>
             )}
             {saveError && (
               <p className="text-xs text-destructive">{saveError}</p>
@@ -235,5 +257,3 @@ function QueueItem({
     </li>
   )
 }
-
-

@@ -1,15 +1,29 @@
 import { NextResponse } from "next/server"
 
+import { checkRateLimit, getClientIp, getInfoRateLimit } from "@/lib/rate-limit"
 import type { FetchInfoRequest } from "@/lib/ytdlp-types"
 import { isValidYoutubeUrl } from "@/lib/ytdlp-utils"
-import { assertSelfHostedRuntime } from "@/lib/runtime-environment"
 import { fetchVideoInfo, YtdlpError } from "@/lib/ytdlp-runner"
 
 export const runtime = "nodejs"
+export const dynamic = "force-dynamic"
 
 export async function POST(request: Request) {
   try {
-    assertSelfHostedRuntime()
+    const limit = checkRateLimit(
+      `info:${getClientIp(request)}`,
+      getInfoRateLimit()
+    )
+    if (!limit.ok) {
+      return NextResponse.json(
+        { error: "Too many requests. Please wait a minute and try again." },
+        {
+          status: 429,
+          headers: { "Retry-After": String(limit.retryAfterSeconds) },
+        }
+      )
+    }
+
     const body = (await request.json()) as FetchInfoRequest
     const url = body.url?.trim()
 

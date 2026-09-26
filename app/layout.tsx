@@ -16,7 +16,8 @@ const fontMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "YouTube Downloader",
-  description: "Download YouTube videos with yt-dlp",
+  description:
+    "Self-hosted YouTube downloader powered by yt-dlp — files are delivered straight to your device.",
 }
 
 export default function RootLayout({

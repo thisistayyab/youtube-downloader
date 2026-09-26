@@ -34,6 +34,13 @@ pnpm-debug.log*
 # yt-dlp temp downloads (never commit)
 /downloads
 
+# provisioned binaries (created by `npm run setup:binaries`)
+/bin
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# cookies (sensitive authentication credentials)
+cookies.txt
+*cookies*.txt

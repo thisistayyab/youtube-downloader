@@ -9,6 +9,7 @@ import {
   applyUploadDateToFile,
   createJobDirectory,
   deleteJobDirectory,
+  getDeliveredJobTtlMs,
   getJobTtlMs,
   getProcessingTimeoutMs,
   parseYtdlpOutputLine,
@@ -16,11 +17,9 @@ import {
   resolveJobOutputFile,
   sanitizeYtdlpMessage,
   spawnDownload,
+  sweepStaleJobDirectories,
 } from "./ytdlp-runner"
-import {
-  isJobFileReady,
-  writeJobManifest,
-} from "./job-manifest"
+import { isJobFileReady, writeJobManifest } from "./job-manifest"
 
 interface StoredJob {
   id: string
@@ -42,8 +41,10 @@ interface StoredJob {
   stderr: string
   processingPhase?: string
   lastActivityAt: number
+  deliveredAt?: number
   process?: { kill: () => void }
   watchdog?: ReturnType<typeof setInterval>
+  cleanupTimer?: ReturnType<typeof setTimeout>
 }
 
 const jobs = new Map<string, StoredJob>()
@@ -152,9 +153,47 @@ export function removeJob(jobId: string): void {
   const job = jobs.get(jobId)
   if (!job) return
   clearWatchdog(job)
+  if (job.cleanupTimer) {
+    clearTimeout(job.cleanupTimer)
+    job.cleanupTimer = undefined
+  }
   job.process?.kill()
   deleteJobDirectory(jobId)
   jobs.delete(jobId)
+}
+
+/** Jobs that are not in a terminal state — used to cap concurrent work. */
+export function countActiveJobs(): number {
+  let active = 0
+  for (const job of jobs.values()) {
+    if (
+      job.status !== "completed" &&
+      job.status !== "error" &&
+      job.status !== "cancelled"
+    ) {
+      active += 1
+    }
+  }
+  return active
+}
+
+/**
+ * Called once a completed file has been fully streamed to the user's device.
+ * The file lives on the server only as a short delivery buffer: it is deleted
+ * after DELIVERED_JOB_TTL_MS so a failed browser download can be retried.
+ * Transfers that never complete fall back to the regular JOB_TTL_MS cleanup.
+ */
+export function markJobDelivered(jobId: string): void {
+  const job = jobs.get(jobId)
+  if (!job || job.status !== "completed") return
+
+  const graceMs = getDeliveredJobTtlMs()
+  job.deliveredAt = Date.now()
+  job.expiresAt = Math.min(job.expiresAt, job.deliveredAt + graceMs)
+
+  if (job.cleanupTimer) clearTimeout(job.cleanupTimer)
+  job.cleanupTimer = setTimeout(() => removeJob(jobId), graceMs)
+  job.cleanupTimer.unref?.()
 }
 
 export function startJob(input: {
@@ -200,7 +239,7 @@ function runJob(jobId: string): void {
     job.url,
     job.options,
     job.jobDir,
-    (line) => {
+    (line: string) => {
       const current = jobs.get(jobId)
       if (!current) return
 
@@ -213,7 +252,8 @@ function runJob(jobId: string): void {
       if (update.progress !== undefined) current.progress = update.progress
       if (update.speed) current.speed = update.speed
       if (update.eta) current.eta = update.eta
-      if (update.processingPhase) current.processingPhase = update.processingPhase
+      if (update.processingPhase)
+        current.processingPhase = update.processingPhase
       if (update.status === "processing") {
         current.speed = undefined
         current.eta = undefined
@@ -223,7 +263,7 @@ function runJob(jobId: string): void {
         current.fileName = update.filePath.split(/[/\\]/).pop()
       }
     },
-    (code) => completeOrFail(jobId, code)
+    (code: number | null) => completeOrFail(jobId, code)
   )
 
   job.watchdog = setInterval(() => {
@@ -234,7 +274,7 @@ function runJob(jobId: string): void {
     }
 
     const idleMs = Date.now() - current.lastActivityAt
-  const timeoutMs = getProcessingTimeoutMs()
+    const timeoutMs = getProcessingTimeoutMs()
 
     if (idleMs > timeoutMs) {
       current.processingPhase = "Merge timed out — retrying…"
@@ -246,6 +286,13 @@ function runJob(jobId: string): void {
 
 export function scheduleCleanup(): void {
   const intervalMs = Math.min(getJobTtlMs(), 300_000)
+
+  // Remove leftover directories from previous runs (crash, redeploy).
+  try {
+    sweepStaleJobDirectories(getJobTtlMs())
+  } catch {
+    // Non-fatal: temp folders are best-effort.
+  }
 
   setInterval(() => {
     const now = Date.now()

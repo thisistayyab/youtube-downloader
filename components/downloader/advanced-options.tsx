@@ -47,5 +47,3 @@ export function AdvancedOptions({ options, onChange }: AdvancedOptionsProps) {
     </Collapsible>
   )
 }
-
-

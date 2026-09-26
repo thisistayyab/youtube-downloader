@@ -1,7 +1,7 @@
 "use client"
 
 import { Download, Loader2 } from "lucide-react"
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 
 import { AdvancedOptions } from "@/components/downloader/advanced-options"
@@ -26,12 +26,12 @@ import {
 } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
 import type { AppCapabilities } from "@/lib/capabilities"
-import { apiFetch } from "@/lib/api-client"
 import type {
   DownloadJob,
   DownloadOptions,
   DownloadProgressEvent,
   FormatCategory,
+  StartDownloadResponse,
   YtdlpVideoInfo,
 } from "@/lib/ytdlp-types"
 import {
@@ -40,12 +40,15 @@ import {
   decodeYoutubeTitle,
   getDefaultPresetForVideo,
   PRESET_FORMATS,
-  sanitizeWindowsFilename,
 } from "@/lib/ytdlp-utils"
+
+const QUEUE_STORAGE_KEY = "ytdlp_download_queue"
+
+type FormatPreset = (typeof PRESET_FORMATS)[number]
 
 function applyPresetOptions(
   prev: DownloadOptions,
-  preset: (typeof PRESET_FORMATS)[number]
+  preset: FormatPreset
 ): DownloadOptions {
   return {
     ...prev,
@@ -64,11 +67,11 @@ const DEFAULT_OPTIONS: DownloadOptions = {
   embedSubs: false,
   writeSubs: false,
   writeAutoSubs: false,
-  subLangs: "en.*",
+  subLangs: "en.*,es",
   audioOnly: false,
   mergeOutputFormat: "mp4",
   extraArgs: "",
-  convertOpusToAac: true,
+  convertOpusToAac: false,
   preserveUploadDate: true,
 }
 
@@ -95,80 +98,77 @@ function mapProgressToJob(
   }
 }
 
-function parseContentDispositionFilename(header: string | null): string | null {
-  if (!header) return null
-  const encoded = header.match(/filename\*=UTF-8''([^;\s]+)/i)?.[1]
-  if (encoded) {
-    try {
-      return decodeURIComponent(encoded)
-    } catch {
-      return encoded
+/**
+ * Triggers native browser download without loading the file into memory.
+ */
+async function saveJobFile(job: DownloadJob): Promise<string | null> {
+  const fileUrl = `/api/jobs/${job.id}/file`
+
+  try {
+    const headRes = await fetch(fileUrl, { method: "HEAD" })
+    if (!headRes.ok) {
+      const data = (await headRes.json().catch(() => null)) as {
+        error?: string
+      } | null
+      return data?.error ?? "File is not ready on the server."
     }
-  }
-  const quoted = header.match(/filename="([^"]+)"/i)?.[1]
-  if (quoted) {
-    try {
-      return decodeURIComponent(quoted)
-    } catch {
-      return quoted
-    }
-  }
-  return null
-}
-
-async function saveJobFile(
-  job: DownloadJob,
-  apiBaseUrl?: string | null
-): Promise<string | null> {
-  const res = await apiFetch(
-    `/api/jobs/${job.id}/file`,
-    { cache: "no-store" },
-    apiBaseUrl
-  )
-
-  if (!res.ok) {
-    const data = (await res.json().catch(() => null)) as { error?: string } | null
-    return data?.error ?? "File not available. Download again after the job completes."
+  } catch {
+    // Non-fatal if HEAD preflight is blocked, still try downloading
   }
 
-  const blob = await res.blob()
-  const fileName =
-    parseContentDispositionFilename(res.headers.get("Content-Disposition")) ??
-    job.filePath ??
-    sanitizeWindowsFilename(decodeYoutubeTitle(job.title), ".mp4")
-
-  const objectUrl = URL.createObjectURL(blob)
   const anchor = document.createElement("a")
-  anchor.href = objectUrl
-  anchor.download = fileName
+  anchor.href = fileUrl
+  anchor.download = job.filePath ?? ""
+  anchor.style.display = "none"
+  document.body.appendChild(anchor)
   anchor.click()
-  URL.revokeObjectURL(objectUrl)
+  setTimeout(() => anchor.remove(), 1000)
   return null
 }
 
 export function DownloaderApp({
-  capabilities = null,
-  apiBaseUrl = null,
-  agentStatus = null,
+  capabilities,
 }: {
-  capabilities?: AppCapabilities | null
-  apiBaseUrl?: string | null
-  agentStatus?: ReactNode
+  capabilities: AppCapabilities
 }) {
-  useToolSetupToasts(capabilities ?? null)
+  useToolSetupToasts(capabilities)
 
-  const toolsReady = capabilities?.ytdlp.available && capabilities?.ffmpeg.available
+  const toolsReady =
+    capabilities.ytdlp.available && capabilities.ffmpeg.available
+
   const [url, setUrl] = useState("")
   const [videoInfo, setVideoInfo] = useState<YtdlpVideoInfo | null>(null)
   const [isFetching, setIsFetching] = useState(false)
   const [fetchError, setFetchError] = useState<string | null>(null)
   const [formatCategory, setFormatCategory] = useState<FormatCategory>("video")
   const [options, setOptions] = useState<DownloadOptions>(DEFAULT_OPTIONS)
-  const [jobs, setJobs] = useState<DownloadJob[]>([])
   const [isStartingDownload, setIsStartingDownload] = useState(false)
+  const [jobs, setJobs] = useState<DownloadJob[]>(() => {
+    if (typeof window === "undefined") return []
+    try {
+      const raw = localStorage.getItem(QUEUE_STORAGE_KEY)
+      if (raw) {
+        const stored = JSON.parse(raw) as DownloadJob[]
+        if (Array.isArray(stored)) return stored
+      }
+    } catch {
+      // Ignore localStorage errors
+    }
+    return []
+  })
+
   const pollTimers = useRef<Map<string, ReturnType<typeof setInterval>>>(
     new Map()
   )
+
+  // Persist queue updates to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem(QUEUE_STORAGE_KEY, JSON.stringify(jobs))
+    } catch {
+      // Ignore localStorage errors
+    }
+  }, [jobs])
 
   const stopPolling = useCallback((jobId: string) => {
     const timer = pollTimers.current.get(jobId)
@@ -182,63 +182,79 @@ export function DownloaderApp({
     (jobId: string) => {
       stopPolling(jobId)
 
-      const timer = setInterval(async () => {
+      const check = async () => {
         try {
-          const res = await apiFetch(
-            `/api/jobs/${jobId}`,
-            { cache: "no-store" },
-            apiBaseUrl
-          )
-          const data = (await res.json()) as DownloadProgressEvent & {
-            error?: string
-          }
-
+          const res = await fetch(`/api/jobs/${jobId}`, { cache: "no-store" })
           if (!res.ok) {
-            stopPolling(jobId)
-            setJobs((prev) =>
-              prev.map((job) =>
-                job.id === jobId
-                  ? {
-                      ...job,
-                      status: "error",
-                      error: data.error ?? "Job not found",
-                    }
-                  : job
-              )
-            )
+            if (res.status === 404) {
+              stopPolling(jobId)
+            }
             return
           }
 
+          const event = (await res.json()) as DownloadProgressEvent
+
           setJobs((prev) =>
-            prev.map((job) =>
-              job.id === jobId ? mapProgressToJob(job, data) : job
-            )
+            prev.map((j) => {
+              if (j.id !== jobId) return j
+
+              const updated = mapProgressToJob(j, event)
+
+              // When finished and file is ready, trigger automatic save to user's device
+              if (
+                updated.status === "completed" &&
+                updated.fileReady &&
+                !updated.autoSaved
+              ) {
+                updated.autoSaved = true
+                void saveJobFile(updated).then((err) => {
+                  if (err) {
+                    toast.error("Could not save file", { description: err })
+                  } else {
+                    toast.success("Download ready!", {
+                      description:
+                        "The file is now saving to your device Downloads folder.",
+                    })
+                  }
+                })
+              }
+
+              return updated
+            })
           )
 
-          if (TERMINAL_STATUSES.has(data.status)) {
+          if (TERMINAL_STATUSES.has(event.status)) {
             stopPolling(jobId)
+            if (event.status === "error") {
+              toast.error("Download failed", {
+                description:
+                  event.error ?? "An error occurred during download.",
+              })
+            }
           }
         } catch {
-          stopPolling(jobId)
-          setJobs((prev) =>
-            prev.map((job) =>
-              job.id === jobId
-                ? {
-                    ...job,
-                    status: "error",
-                    error: "Lost connection to server",
-                  }
-                : job
-            )
-          )
+          // Keep polling on temporary network hiccup
         }
-      }, 800)
+      }
 
+      void check()
+      const timer = setInterval(check, 1000)
       pollTimers.current.set(jobId, timer)
     },
-    [stopPolling, apiBaseUrl]
+    [stopPolling]
   )
 
+  // Resume polling for any in-flight jobs on page load
+  useEffect(() => {
+    for (const job of jobs) {
+      if (!TERMINAL_STATUSES.has(job.status)) {
+        pollJob(job.id)
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Clean up all timers on unmount
   useEffect(() => {
     const timers = pollTimers.current
     return () => {
@@ -255,19 +271,14 @@ export function DownloaderApp({
     setUrl(inputUrl)
 
     try {
-      const res = await apiFetch(
-        "/api/info",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ url: inputUrl }),
-        },
-        apiBaseUrl
-      )
+      const response = await fetch("/api/info", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: inputUrl }),
+      })
+      const data = await response.json()
 
-      const data = await res.json()
-
-      if (!res.ok) {
+      if (!response.ok) {
         throw new Error(data.error ?? "Failed to fetch video info")
       }
 
@@ -275,33 +286,35 @@ export function DownloaderApp({
       const defaultPreset = getDefaultPresetForVideo(info)
       setVideoInfo(info)
       setFormatCategory("custom")
-      setOptions((prev) => ({
-        ...applyPresetOptions(prev, defaultPreset),
+      setOptions((previous) => ({
+        ...applyPresetOptions(previous, defaultPreset),
         audioOnly: false,
       }))
-    } catch (err) {
+    } catch (error) {
       setVideoInfo(null)
       const message =
-        err instanceof Error ? err.message : "Something went wrong"
+        error instanceof Error ? error.message : "Something went wrong"
       setFetchError(message)
-      if (
-        message.toLowerCase().includes("yt-dlp") ||
-        message.toLowerCase().includes("ffmpeg")
-      ) {
-        toast.error("Required tool not set up", {
-          description: message,
-          action: {
-            label: "PC Setup",
-            onClick: () => {
-              window.location.href = "/setup"
-            },
-          },
-        })
+
+      if (/yt-dlp|ffmpeg/i.test(message)) {
+        toast.error("Server tools unavailable", { description: message })
       }
     } finally {
       setIsFetching(false)
     }
-  }, [apiBaseUrl])
+  }, [])
+
+  const handleCategoryChange = useCallback((category: FormatCategory) => {
+    setFormatCategory(category)
+    setOptions((previous) => ({
+      ...previous,
+      audioOnly: category === "audio",
+      mergeOutputFormat:
+        category === "video" || category === "audio"
+          ? "mp4"
+          : previous.mergeOutputFormat,
+    }))
+  }, [])
 
   const handleDownload = useCallback(async () => {
     if (!videoInfo || isStartingDownload) return
@@ -309,38 +322,34 @@ export function DownloaderApp({
     setIsStartingDownload(true)
 
     try {
-      const res = await apiFetch(
-        "/api/download",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            url,
-            videoInfo: {
-              id: videoInfo.id,
-              title: videoInfo.title,
-              thumbnail: videoInfo.thumbnail,
-              webpage_url: videoInfo.webpage_url,
-              upload_date: videoInfo.upload_date,
-            },
-            options,
-          }),
-        },
-        apiBaseUrl
-      )
+      const response = await fetch("/api/download", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          url,
+          videoInfo: {
+            id: videoInfo.id,
+            title: videoInfo.title,
+            thumbnail: videoInfo.thumbnail,
+            webpage_url: videoInfo.webpage_url,
+            upload_date: videoInfo.upload_date,
+          },
+          options,
+        }),
+      })
 
-      const data = await res.json()
+      const data = await response.json()
 
-      if (!res.ok) {
+      if (!response.ok) {
         throw new Error(data.error ?? "Download failed to start")
       }
 
-      const { jobId } = data as { jobId: string }
+      const { jobId } = data as StartDownloadResponse
 
       const job: DownloadJob = {
         id: jobId,
         url,
-        title: videoInfo.title,
+        title: decodeYoutubeTitle(videoInfo.title),
         thumbnail: videoInfo.thumbnail,
         status: "queued",
         progress: 0,
@@ -349,41 +358,30 @@ export function DownloaderApp({
       }
 
       setJobs((prev) => [job, ...prev])
+      toast.info("Download queued", {
+        description: "Your download has started on the server.",
+      })
       pollJob(jobId)
-    } catch (err) {
-      setJobs((prev) => [
-        {
-          id: crypto.randomUUID(),
-          url,
-          title: videoInfo.title,
-          thumbnail: videoInfo.thumbnail,
-          status: "error",
-          progress: 0,
-          options: { ...options },
-          createdAt: Date.now(),
-          error: err instanceof Error ? err.message : "Download failed",
-        },
-        ...prev,
-      ])
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to start download"
+      toast.error("Download error", { description: message })
     } finally {
       setIsStartingDownload(false)
     }
-  }, [videoInfo, url, options, isStartingDownload, pollJob, apiBaseUrl])
+  }, [isStartingDownload, options, pollJob, url, videoInfo])
 
   const handleRemoveJob = useCallback(
     (jobId: string) => {
       stopPolling(jobId)
-      setJobs((prev) => prev.filter((job) => job.id !== jobId))
-      void apiFetch(`/api/jobs/${jobId}`, { method: "DELETE" }, apiBaseUrl)
+      setJobs((prev) => prev.filter((j) => j.id !== jobId))
+      void fetch(`/api/jobs/${jobId}`, { method: "DELETE" }).catch(() => null)
     },
-    [stopPolling, apiBaseUrl]
+    [stopPolling]
   )
 
-  useEffect(() => {
-    setOptions((prev) => ({ ...prev, audioOnly: formatCategory === "audio" }))
-  }, [formatCategory])
-
-  return (<div className="min-h-svh bg-gradient-to-b from-muted/30 to-background">
+  return (
+    <div className="min-h-svh bg-gradient-to-b from-muted/30 to-background">
       <DownloaderHeader />
 
       <main className="mx-auto max-w-6xl space-y-6 px-4 py-6 sm:px-6 sm:py-8">
@@ -392,21 +390,12 @@ export function DownloaderApp({
             Download YouTube videos
           </h1>
           <p className="max-w-2xl text-sm text-muted-foreground sm:text-base">
-            Paste a link, pick a format, and download. Default is{" "}
-            <strong className="font-medium text-foreground">1080p MP4 + AAC</strong>{" "}
-            (~200 MB at 1080p). For 4K SDR (~190 MB) use Custom →{" "}
-            <strong className="font-medium text-foreground">4K SDR MP4 + AAC</strong>.
-            4K HDR is ~380 MB.{" "}
-            <a
-              href="/setup"
-              className="font-medium text-foreground underline underline-offset-2"
-            >
-              PC setup guide
-            </a>
+            Paste a link, choose a format, and download. Video and audio are
+            processed on the server with yt-dlp &amp; ffmpeg and handed straight
+            to your browser&apos;s download manager.
           </p>
           <LegalNotice />
-          {agentStatus}
-          <ToolSetupBanner capabilities={capabilities ?? null} />
+          <ToolSetupBanner capabilities={capabilities} />
         </section>
 
         <div className="grid gap-6 lg:grid-cols-5">
@@ -415,7 +404,7 @@ export function DownloaderApp({
               <CardHeader>
                 <CardTitle className="text-base">Video URL</CardTitle>
                 <CardDescription>
-                  Fetch metadata with yt-dlp before downloading
+                  Fetch metadata and available formats with yt-dlp
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -423,7 +412,7 @@ export function DownloaderApp({
                   onFetch={handleFetch}
                   isLoading={isFetching}
                   error={fetchError}
-                  disabled={capabilities !== null && !toolsReady}
+                  disabled={!toolsReady}
                 />
               </CardContent>
             </Card>
@@ -433,26 +422,31 @@ export function DownloaderApp({
                 <CardHeader>
                   <CardTitle className="text-base">Download settings</CardTitle>
                   <CardDescription>
-                    Maps directly to yt-dlp CLI flags
+                    Configure format presets, audio extraction, and metadata
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-6">
                   <FormatSelector
                     info={videoInfo}
                     category={formatCategory}
-                    onCategoryChange={setFormatCategory}
+                    onCategoryChange={handleCategoryChange}
                     format={options.format}
                     onFormatChange={(format) =>
-                      setOptions((prev) => ({ ...prev, format }))
+                      setOptions((previous) => ({ ...previous, format }))
                     }
                     onPresetApply={(preset) =>
-                      setOptions((prev) => applyPresetOptions(prev, preset))
+                      setOptions((previous) =>
+                        applyPresetOptions(previous, preset)
+                      )
                     }
                   />
 
                   <Separator />
 
-                  <DownloadOptionsPanel options={options} onChange={setOptions} />
+                  <DownloadOptionsPanel
+                    options={options}
+                    onChange={setOptions}
+                  />
 
                   <AdvancedOptions options={options} onChange={setOptions} />
 
@@ -483,10 +477,10 @@ export function DownloaderApp({
             <VideoPreview info={videoInfo} isLoading={isFetching} />
             <DownloadQueue
               jobs={jobs}
-              onSaveFile={(job) => saveJobFile(job, apiBaseUrl)}
+              onSaveFile={saveJobFile}
               onRemove={handleRemoveJob}
               onClearCompleted={() =>
-                setJobs((prev) => prev.filter((job) => job.status !== "completed"))
+                setJobs((prev) => prev.filter((j) => j.status !== "completed"))
               }
             />
           </div>
@@ -495,5 +489,3 @@ export function DownloaderApp({
     </div>
   )
 }
-
-

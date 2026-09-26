@@ -74,17 +74,25 @@ export function FormatSelector({
       return
     }
 
-    if (category === "video" && videoSelectValue && videoSelectValue !== format) {
+    if (
+      category === "video" &&
+      videoSelectValue &&
+      videoSelectValue !== format
+    ) {
       onFormatChange(videoSelectValue)
       return
     }
 
-    if (category === "audio" && audioSelectValue && audioSelectValue !== format) {
+    if (
+      category === "audio" &&
+      audioSelectValue &&
+      audioSelectValue !== format
+    ) {
       onFormatChange(audioSelectValue)
     }
   }, [
     category,
-    info.id,
+    info,
     format,
     availablePresets,
     videoSelectValue,
@@ -199,14 +207,16 @@ export function FormatSelector({
             </SelectContent>
           </Select>
           <p className="text-xs text-muted-foreground">
-            Maps to yt-dlp{" "}
-            <code className="font-mono">-f bestaudio</code> or a specific
-            format ID.
+            Maps to yt-dlp <code className="font-mono">-f bestaudio</code> or a
+            specific format ID.
           </p>
         </TabsContent>
 
         <TabsContent value="custom" className="mt-3 space-y-2">
-          <Select value={customPresetId} onValueChange={handleCustomPresetChange}>
+          <Select
+            value={customPresetId}
+            onValueChange={handleCustomPresetChange}
+          >
             <SelectTrigger className="w-full">
               <SelectValue placeholder="Select preset" />
             </SelectTrigger>
@@ -224,8 +234,10 @@ export function FormatSelector({
           {maxHeight > 0 && maxHeight < 2160 && (
             <p className="text-xs text-muted-foreground">
               This video maxes out at{" "}
-              <strong className="font-medium text-foreground">{maxLabel}</strong>
-              {" "}on YouTube — 4K presets are hidden.
+              <strong className="font-medium text-foreground">
+                {maxLabel}
+              </strong>{" "}
+              on YouTube — 4K presets are hidden.
             </p>
           )}
           <div className="rounded-lg border bg-muted/40 p-3">

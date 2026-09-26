@@ -29,51 +29,85 @@ export class YtdlpError extends Error {
   }
 }
 
-/** Resolve yt-dlp binary. Override with YTDLP_PATH (e.g. C:\\tools\\yt-dlp.exe). */
+/** Resolve yt-dlp binary. Override with YTDLP_PATH (e.g. /usr/local/bin/yt-dlp). */
 export function getYtdlpExecutable(): string {
-  if (process.env.YTDLP_PATH?.trim()) {
-    return process.env.YTDLP_PATH.trim()
+  const configured = process.env.YTDLP_PATH?.trim()
+  if (configured) {
+    return fs.existsSync(configured) ? path.resolve(configured) : configured
   }
-  return process.platform === "win32" ? "yt-dlp.exe" : "yt-dlp"
+
+  const localName = process.platform === "win32" ? "yt-dlp.exe" : "yt-dlp"
+  const localPath = path.join(process.cwd(), "bin", localName)
+  return fs.existsSync(localPath) ? localPath : localName
 }
 
 /** Optional ffmpeg path for yt-dlp --ffmpeg-location (required for merge/embed). */
 export function getFfmpegLocation(): string | undefined {
-  const raw = process.env.FFMPEG_PATH?.trim()
-  if (!raw) return undefined
-
-  const resolved = path.resolve(raw)
-
-  try {
-    if (fs.existsSync(resolved)) {
-      if (fs.statSync(resolved).isDirectory()) {
-        return resolved
+  const configured = process.env.FFMPEG_PATH?.trim()
+  if (configured) {
+    const resolved = path.resolve(configured)
+    try {
+      if (fs.existsSync(resolved)) {
+        return fs.statSync(resolved).isDirectory()
+          ? resolved
+          : path.dirname(resolved)
       }
-      return path.dirname(resolved)
+    } catch {
+      // Fall through to configured string
     }
-  } catch {
-    // Fall through to raw value.
+    return configured
   }
 
-  return raw
+  const executable = process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg"
+  const localPath = path.join(process.cwd(), "bin", executable)
+  return fs.existsSync(localPath) ? path.dirname(localPath) : undefined
 }
 
 export function getFfmpegExecutable(): string {
   const location = getFfmpegLocation()
-  if (!location) {
-    return process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg"
+  const executable = process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg"
+  if (!location) return executable
+
+  const candidate = path.join(location, executable)
+  return fs.existsSync(candidate) ? candidate : location
+}
+
+/** Resolves cookies file from env var path, raw env string, or ./cookies.txt */
+export function getCookiesPath(): string | undefined {
+  const envPath =
+    process.env.COOKIES_PATH?.trim() || process.env.YTDLP_COOKIES_PATH?.trim()
+  if (envPath && fs.existsSync(envPath)) {
+    return path.resolve(envPath)
   }
 
-  const exeName = process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg"
-  const asFile = path.join(location, exeName)
-
-  try {
-    if (fs.existsSync(asFile)) return asFile
-  } catch {
-    // Fall through.
+  const envContent =
+    process.env.YOUTUBE_COOKIES?.trim() || process.env.YTDLP_COOKIES?.trim()
+  if (envContent) {
+    const tmpDir = process.env.DOWNLOAD_DIR || "/tmp"
+    const tmpCookies = path.join(path.resolve(tmpDir), "youtube-cookies.txt")
+    try {
+      fs.mkdirSync(path.dirname(tmpCookies), { recursive: true })
+      fs.writeFileSync(tmpCookies, envContent, "utf8")
+      return tmpCookies
+    } catch {
+      // ignore
+    }
   }
 
-  return location
+  const localCookies = path.join(process.cwd(), "cookies.txt")
+  if (fs.existsSync(localCookies)) {
+    return localCookies
+  }
+
+  return undefined
+}
+
+export function getProxyUrl(): string | undefined {
+  const proxy =
+    process.env.YTDLP_PROXY?.trim() ||
+    process.env.HTTPS_PROXY?.trim() ||
+    process.env.HTTP_PROXY?.trim()
+  return proxy || undefined
 }
 
 export function requiresFfmpeg(options: DownloadOptions): boolean {
@@ -89,24 +123,43 @@ export function requiresFfmpeg(options: DownloadOptions): boolean {
 }
 
 export function getDownloadRoot(): string {
-  const root = process.env.DOWNLOAD_DIR?.trim() || path.join(process.cwd(), "downloads")
+  const root =
+    process.env.DOWNLOAD_DIR?.trim() || path.join(process.cwd(), "downloads")
   return path.resolve(root)
+}
+
+export function ensureDownloadRoot(): string {
+  const root = getDownloadRoot()
+  fs.mkdirSync(root, { recursive: true })
+  return root
 }
 
 export function getJobTtlMs(): number {
   const raw = process.env.JOB_TTL_MS?.trim()
-  const parsed = raw ? Number.parseInt(raw, 10) : 3_600_000
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 3_600_000
+  const parsed = raw ? Number.parseInt(raw, 10) : 900_000
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 900_000
 }
 
-/** Kill a stuck merge if no output for this long (ms). */
+export function getDeliveredJobTtlMs(): number {
+  const raw = process.env.DELIVERED_JOB_TTL_MS?.trim()
+  const parsed = raw ? Number.parseInt(raw, 10) : 15_000
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 15_000
+}
+
+/** Kill a stuck merge if no activity for this long (ms). */
 export function getProcessingTimeoutMs(): number {
   const raw = process.env.PROCESSING_TIMEOUT_MS?.trim()
-  const parsed = raw ? Number.parseInt(raw, 10) : 600_000
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 600_000
+  const parsed = raw ? Number.parseInt(raw, 10) : 300_000
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 300_000
 }
 
-export async function ensureFfmpegAvailable(): Promise<void> {
+export function getMaxConcurrentJobs(): number {
+  const raw = process.env.MAX_CONCURRENT_JOBS?.trim()
+  const parsed = raw ? Number.parseInt(raw, 10) : 2
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 2
+}
+
+export function ensureFfmpegAvailable(): Promise<void> {
   const ffmpegPath = getFfmpegExecutable()
 
   return new Promise((resolve, reject) => {
@@ -136,7 +189,7 @@ export async function ensureFfmpegAvailable(): Promise<void> {
   })
 }
 
-export async function ensureYtdlpAvailable(): Promise<string> {
+export function ensureYtdlpAvailable(): Promise<string> {
   const executable = getYtdlpExecutable()
 
   return new Promise((resolve, reject) => {
@@ -158,7 +211,7 @@ export async function ensureYtdlpAvailable(): Promise<string> {
     proc.on("error", (err) => {
       reject(
         new YtdlpError(
-          `yt-dlp not found (${executable}). Install yt-dlp and ensure it is on PATH, or set YTDLP_PATH. ${err.message}`
+          `yt-dlp not found (${executable}). Run setup:binaries, or set YTDLP_PATH. ${err.message}`
         )
       )
     })
@@ -182,7 +235,29 @@ export async function fetchVideoInfo(url: string): Promise<YtdlpVideoInfo> {
   await ensureYtdlpAvailable()
 
   return new Promise((resolve, reject) => {
-    const args = ["--dump-json", "--no-playlist", "--no-warnings", url]
+    const args = [
+      "--no-config",
+      "--dump-json",
+      "--no-playlist",
+      "--no-warnings",
+      "--js-runtimes",
+      "node",
+      "--remote-components",
+      "ejs:github",
+    ]
+
+    const cookiesPath = getCookiesPath()
+    if (cookiesPath) {
+      args.push("--cookies", cookiesPath)
+    }
+
+    const proxy = getProxyUrl()
+    if (proxy) {
+      args.push("--proxy", proxy)
+    }
+
+    args.push(url)
+
     const proc = spawn(getYtdlpExecutable(), args, {
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
@@ -195,7 +270,7 @@ export async function fetchVideoInfo(url: string): Promise<YtdlpVideoInfo> {
       stdout += chunk.toString()
     })
     proc.stderr.on("data", (chunk: Buffer) => {
-      stderr += chunk.toString()
+      stderr = `${stderr}${chunk.toString()}`.slice(-4000)
     })
 
     proc.on("error", (err) => {
@@ -204,7 +279,11 @@ export async function fetchVideoInfo(url: string): Promise<YtdlpVideoInfo> {
 
     proc.on("close", (code) => {
       if (code !== 0) {
-        reject(new YtdlpError(sanitizeYtdlpMessage(stderr) || "Failed to fetch video info"))
+        reject(
+          new YtdlpError(
+            sanitizeYtdlpMessage(stderr) || "Failed to fetch video info"
+          )
+        )
         return
       }
 
@@ -223,32 +302,52 @@ export function buildYtdlpArgs(
   options: DownloadOptions,
   outputDir: string
 ): string[] {
-  // Use video id for paths during download — titles with ":" or "▪" break ffmpeg on Windows.
   const outputPath = path.join(outputDir, INTERNAL_OUTPUT_TEMPLATE)
 
   const args = [
+    "--no-config",
     "--no-warnings",
     "--newline",
     "--progress",
     "--no-playlist",
     "--no-mtime",
     "--windows-filenames",
+    "--js-runtimes",
+    "node",
+    "--remote-components",
+    "ejs:github",
     "--retries",
     "3",
+    "--fragment-retries",
+    "3",
+    "--socket-timeout",
+    "30",
     "-f",
     options.format,
     "-o",
     outputPath,
-    "--merge-output-format",
-    options.mergeOutputFormat,
   ]
+
+  const cookiesPath = getCookiesPath()
+  if (cookiesPath) {
+    args.push("--cookies", cookiesPath)
+  }
+
+  const proxy = getProxyUrl()
+  if (proxy) {
+    args.push("--proxy", proxy)
+  }
+
+  if (options.mergeOutputFormat) {
+    args.push("--merge-output-format", options.mergeOutputFormat)
+  }
 
   const ffmpegLocation = getFfmpegLocation()
   if (ffmpegLocation) {
     args.push("--ffmpeg-location", ffmpegLocation)
   }
 
-  // MP4 + Windows Media Player: mux AAC (re-encode only if stream isn't already AAC).
+  // MP4 container compatibility: ensure AAC audio when merging MP4 video
   if (options.mergeOutputFormat === "mp4" && !options.audioOnly) {
     args.push(
       "--postprocessor-args",
@@ -262,13 +361,18 @@ export function buildYtdlpArgs(
   if (options.writeAutoSubs) args.push("--write-auto-subs")
   if (options.embedSubs) args.push("--embed-subs")
 
-  if ((options.writeSubs || options.writeAutoSubs) && options.subLangs.trim()) {
+  if (
+    (options.writeSubs || options.writeAutoSubs) &&
+    options.subLangs?.trim()
+  ) {
     args.push("--sub-langs", options.subLangs.trim())
   }
 
-  args.push(...parseExtraArgs(options.extraArgs))
-  args.push(url)
+  if (options.extraArgs) {
+    args.push(...parseExtraArgs(options.extraArgs))
+  }
 
+  args.push(url)
   return args
 }
 
@@ -376,11 +480,10 @@ export function findDownloadedFile(jobDir: string): string | undefined {
   return files[0]?.fullPath
 }
 
-/** Prefer the final merged file — job.filePath may still point at a deleted .f337.webm. */
 export function resolveJobOutputFile(
   jobDir: string,
   hintedPath: string | undefined,
-  mergeFormat: "mp4" | "mkv" | "webm"
+  mergeFormat: "mp4" | "mkv" | "webm" = "mp4"
 ): string | undefined {
   const candidates: string[] = []
 
@@ -441,7 +544,7 @@ function listStreamFiles(jobDir: string): StreamFile[] {
     .filter((entry): entry is StreamFile => entry !== null)
 }
 
-/** Merge separate yt-dlp streams when yt-dlp merger hangs (common with 4K VP9→MP4). */
+/** Fallback merge for edge cases where native merger stalled */
 export function tryManualMerge(
   jobDir: string,
   mergeFormat: "mp4" | "mkv" | "webm" = "mp4"
@@ -454,25 +557,37 @@ export function tryManualMerge(
 
   const audio =
     streams.find((f) => f.isAudio || /\.m4a$/i.test(f.name)) ??
-    streams.filter((f) => /\.webm$/i.test(f.name)).sort((a, b) => a.size - b.size)[0]
+    streams
+      .filter((f) => /\.webm$/i.test(f.name))
+      .sort((a, b) => a.size - b.size)[0]
   const video = streams
     .filter((f) => f !== audio && /\.(mp4|webm|mkv)$/i.test(f.name))
     .sort((a, b) => b.size - a.size)[0]
 
   if (!audio || !video) return undefined
 
-  const baseName = video.name.replace(/\.f[\d-]+\.[^.]+$/i, "").replace(/\.[^.]+$/i, "")
+  const baseName = video.name
+    .replace(/\.f[\d-]+\.[^.]+$/i, "")
+    .replace(/\.[^.]+$/i, "")
   const outputPath = path.join(jobDir, `${baseName}.${mergeFormat}`)
   const ffmpeg = getFfmpegExecutable()
 
   const audioArgs =
-    mergeFormat === "mp4"
-      ? ["-c:a", "aac", "-b:a", "192k"]
-      : ["-c:a", "copy"]
+    mergeFormat === "mp4" ? ["-c:a", "aac", "-b:a", "192k"] : ["-c:a", "copy"]
 
   const result = spawnSync(
     ffmpeg,
-    ["-y", "-i", video.path, "-i", audio.path, "-c:v", "copy", ...audioArgs, outputPath],
+    [
+      "-y",
+      "-i",
+      video.path,
+      "-i",
+      audio.path,
+      "-c:v",
+      "copy",
+      ...audioArgs,
+      outputPath,
+    ],
     { windowsHide: true, encoding: "utf8" }
   )
 
@@ -488,7 +603,7 @@ export function tryManualMerge(
       try {
         fs.unlinkSync(stream.path)
       } catch {
-        // ignore cleanup errors
+        // ignore cleanup error
       }
     }
   }
@@ -497,6 +612,14 @@ export function tryManualMerge(
 }
 
 export function sanitizeYtdlpMessage(message: string): string {
+  if (
+    /Sign in to confirm you’re not a bot|Sign in to confirm you're not a bot/i.test(
+      message
+    )
+  ) {
+    return "YouTube bot verification triggered: YouTube requires authentication for this video/IP. Provide cookies via a cookies.txt file or the YOUTUBE_COOKIES environment variable."
+  }
+
   const lines = message
     .split("\n")
     .map((line) => line.trim())
@@ -528,12 +651,12 @@ export function applyUploadDateToFile(
   }
 }
 
-export function renameToYoutubeTitle(
-  filePath: string,
-  title: string
-): string {
+export function renameToYoutubeTitle(filePath: string, title: string): string {
   const ext = path.extname(filePath) || ".mp4"
-  const targetPath = path.join(path.dirname(filePath), sanitizeWindowsFilename(title, ext))
+  const targetPath = path.join(
+    path.dirname(filePath),
+    sanitizeWindowsFilename(title, ext)
+  )
 
   if (path.resolve(filePath) === path.resolve(targetPath)) {
     return filePath
@@ -547,12 +670,6 @@ export function renameToYoutubeTitle(
   return targetPath
 }
 
-export function ensureDownloadRoot(): string {
-  const root = getDownloadRoot()
-  fs.mkdirSync(root, { recursive: true })
-  return root
-}
-
 export function createJobDirectory(jobId: string): string {
   const root = ensureDownloadRoot()
   const jobDir = path.join(root, jobId)
@@ -564,6 +681,30 @@ export function deleteJobDirectory(jobId: string): void {
   const jobDir = path.join(getDownloadRoot(), jobId)
   if (!fs.existsSync(jobDir)) return
   fs.rmSync(jobDir, { recursive: true, force: true })
+}
+
+export function sweepStaleJobDirectories(maxAgeMs: number): void {
+  const root = getDownloadRoot()
+  if (!fs.existsSync(root)) return
+
+  const now = Date.now()
+  try {
+    const entries = fs.readdirSync(root, { withFileTypes: true })
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue
+      const dirPath = path.join(root, entry.name)
+      try {
+        const stat = fs.statSync(dirPath)
+        if (now - stat.mtimeMs > maxAgeMs) {
+          fs.rmSync(dirPath, { recursive: true, force: true })
+        }
+      } catch {
+        // Ignore single directory sweep error
+      }
+    }
+  } catch {
+    // Ignore sweep failure
+  }
 }
 
 export interface RunningProcess {

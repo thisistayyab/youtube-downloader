@@ -1,4 +1,3 @@
-import { isServerlessRuntime } from "./runtime-environment"
 import {
   ensureFfmpegAvailable,
   ensureYtdlpAvailable,
@@ -13,7 +12,6 @@ export interface ToolStatus {
 
 export interface AppCapabilities {
   downloadsAvailable: boolean
-  hostedMode: boolean
   message: string
   ytdlp: ToolStatus
   ffmpeg: ToolStatus
@@ -29,7 +27,7 @@ async function checkYtdlp(): Promise<ToolStatus> {
       error:
         err instanceof YtdlpError
           ? err.message
-          : "yt-dlp not found. Install it and add to PATH, or set YTDLP_PATH.",
+          : "yt-dlp not found on the server. Install it and add it to PATH, or set YTDLP_PATH.",
     }
   }
 }
@@ -44,42 +42,21 @@ async function checkFfmpeg(): Promise<ToolStatus> {
       error:
         err instanceof YtdlpError
           ? err.message
-          : "ffmpeg not found. Install it and add to PATH, or set FFMPEG_PATH.",
+          : "ffmpeg not found on the server. Install it and add it to PATH, or set FFMPEG_PATH.",
     }
   }
 }
 
 export async function getAppCapabilities(): Promise<AppCapabilities> {
-  const hostedMode = isServerlessRuntime()
-
-  if (hostedMode) {
-    return {
-      downloadsAvailable: false,
-      hostedMode: true,
-      message:
-        "This site is hosted on a serverless platform (Vercel, Netlify, etc.). " +
-        "Downloads run on your own PC — follow the setup guide below, then use the app at http://localhost:3000.",
-      ytdlp: {
-        available: false,
-        error: "Install yt-dlp on your PC (see setup guide).",
-      },
-      ffmpeg: {
-        available: false,
-        error: "Install ffmpeg on your PC (see setup guide).",
-      },
-    }
-  }
-
   const [ytdlp, ffmpeg] = await Promise.all([checkYtdlp(), checkFfmpeg()])
 
   const downloadsAvailable = ytdlp.available && ffmpeg.available
 
   return {
     downloadsAvailable,
-    hostedMode: false,
     message: downloadsAvailable
       ? `Ready — yt-dlp ${ytdlp.version ?? "installed"}, ffmpeg available.`
-      : "Install missing tools on this PC to enable downloads.",
+      : "Downloads are disabled until yt-dlp and ffmpeg are available on this server.",
     ytdlp,
     ffmpeg,
   }

@@ -35,7 +35,10 @@ export function DownloadOptionsPanel({
   return (
     <div className="space-y-4">
       <div className="space-y-2">
-        <Label htmlFor={`${baseId}-output`} className="flex items-center gap-1.5">
+        <Label
+          htmlFor={`${baseId}-output`}
+          className="flex items-center gap-1.5"
+        >
           <FolderOpen className="size-3.5" />
           Output template
         </Label>
@@ -49,8 +52,7 @@ export function DownloadOptionsPanel({
         <p className="text-xs text-muted-foreground">
           Saved as the YouTube title (invalid characters like{" "}
           <code className="font-mono">:</code> are removed for Windows). Display
-          template:{" "}
-          <code className="font-mono">{DEFAULT_OUTPUT_TEMPLATE}</code>
+          template: <code className="font-mono">{DEFAULT_OUTPUT_TEMPLATE}</code>
         </p>
       </div>
 
@@ -134,7 +136,9 @@ export function DownloadOptionsPanel({
         <Select
           value={options.mergeOutputFormat}
           onValueChange={(v) =>
-            patch({ mergeOutputFormat: v as DownloadOptions["mergeOutputFormat"] })
+            patch({
+              mergeOutputFormat: v as DownloadOptions["mergeOutputFormat"],
+            })
           }
         >
           <SelectTrigger>
@@ -178,5 +182,3 @@ function OptionRow({
     </div>
   )
 }
-
-

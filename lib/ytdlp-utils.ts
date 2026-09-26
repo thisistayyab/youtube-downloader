@@ -56,7 +56,8 @@ export function formatFileSize(bytes?: number): string {
 
 export function formatViewCount(count?: number): string {
   if (!count) return "—"
-  if (count >= 1_000_000_000) return `${(count / 1_000_000_000).toFixed(1)}B views`
+  if (count >= 1_000_000_000)
+    return `${(count / 1_000_000_000).toFixed(1)}B views`
   if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M views`
   if (count >= 1_000) return `${(count / 1_000).toFixed(1)}K views`
   return `${count} views`
@@ -114,9 +115,7 @@ export function getAvailablePresets(info: YtdlpVideoInfo) {
 
   return PRESET_FORMATS.filter((preset) => {
     if (preset.id === "4k-sdr-mp4") return maxHeight >= 2160
-    if (preset.id === "4k-hdr-mp4" || preset.id === "4k-hdr-mkv") {
-      return maxHeight >= 2160 && hdr
-    }
+    if (preset.id === "4k-hdr-mkv") return maxHeight >= 2160 && hdr
     return true
   })
 }
@@ -276,42 +275,77 @@ export function getVideoQualityPresets(
   info: YtdlpVideoInfo
 ): { label: string; value: string }[] {
   const { videoOnly, audioOnly } = groupFormats(info.formats)
-  const m4a = audioOnly.find((f) => f.ext === "m4a")
+  const m4a =
+    audioOnly.find(
+      (f) => f.ext === "m4a" && (f.acodec?.startsWith("mp4a") || !f.acodec)
+    ) ?? audioOnly.find((f) => f.ext === "m4a")
+  const safeAudio = audioOnly.find(
+    (f) => f.acodec?.startsWith("mp4a") || f.ext === "m4a"
+  )
   const seen = new Set<string>()
   const presets: { label: string; value: string }[] = []
 
   for (const height of [2160, 1080, 720, 480, 360, 240]) {
     const candidates = videoOnly.filter((f) => f.height === height)
-    const video =
-      (height === 2160
-        ? candidates.find((f) => !f.format_note?.includes("HDR"))
-        : undefined) ??
-      candidates.find((f) => f.ext === "mp4") ??
-      candidates[0]
+    const nonHdrCandidates = candidates.filter(
+      (f) => !f.format_note?.includes("HDR")
+    )
+    const pool =
+      height === 2160 && nonHdrCandidates.length > 0
+        ? nonHdrCandidates
+        : candidates
+
+    const h264Video = pool.find(
+      (f) =>
+        (f.vcodec?.startsWith("avc1") || f.vcodec?.includes("h264")) &&
+        f.ext === "mp4"
+    )
+    const mp4Video = pool.find((f) => f.ext === "mp4")
+    const anyVideo = pool[0]
+    const video = h264Video ?? mp4Video ?? anyVideo
     if (!video) continue
 
-    const value = videoWithAudioValue(video, audioOnly)
+    const audioForMp4 = m4a ?? safeAudio ?? audioOnly[0]
+    const value = audioForMp4
+      ? `${video.format_id}+${audioForMp4.format_id}`
+      : videoWithAudioValue(video, audioOnly)
     if (seen.has(value)) continue
     seen.add(value)
 
     const hdr = video.format_note?.includes("HDR") ? " HDR" : ""
-    const suffix = m4a ? " + AAC" : " + best audio"
+    const codecSafe =
+      video.vcodec?.startsWith("avc1") || video.vcodec?.includes("h264")
+        ? ""
+        : " (may need MKV)"
+    const suffix = audioForMp4 ? " + AAC" : " + best audio"
     const size = video.filesize ?? video.filesize_approx
     const sizeHint = size ? ` · ~${formatFileSize(size)}` : ""
     presets.push({
-      label: `${height}p${hdr}${suffix}${sizeHint} · ${formatLabel(video)}`,
+      label: `${height}p${hdr}${suffix}${sizeHint}${codecSafe} · ${formatLabel(video)}`,
       value,
     })
 
     if (height === 2160) {
-      const hdrVideo = candidates.find((f) => f.format_note?.includes("HDR"))
-      if (hdrVideo) {
-        const hdrValue = videoWithAudioValue(hdrVideo, audioOnly)
+      const hdrCandidates = candidates.filter((f) =>
+        f.format_note?.includes("HDR")
+      )
+      if (hdrCandidates.length > 0) {
+        const hdrMp4 =
+          hdrCandidates.find(
+            (f) =>
+              (f.vcodec?.startsWith("avc1") || f.vcodec?.includes("h264")) &&
+              f.ext === "mp4"
+          ) ??
+          hdrCandidates.find((f) => f.ext === "mp4") ??
+          hdrCandidates[0]
+        const hdrValue = audioForMp4
+          ? `${hdrMp4.format_id}+${audioForMp4.format_id}`
+          : videoWithAudioValue(hdrMp4, audioOnly)
         if (!seen.has(hdrValue)) {
           seen.add(hdrValue)
-          const hdrSize = hdrVideo.filesize ?? hdrVideo.filesize_approx
+          const hdrSize = hdrMp4.filesize ?? hdrMp4.filesize_approx
           presets.push({
-            label: `2160p HDR + AAC${hdrSize ? ` · ~${formatFileSize(hdrSize)}` : ""} · ${formatLabel(hdrVideo)}`,
+            label: `2160p HDR${audioForMp4 ? " + AAC" : " + best audio"}${hdrSize ? ` · ~${formatFileSize(hdrSize)}` : ""} · ${formatLabel(hdrMp4)}`,
             value: hdrValue,
           })
         }
@@ -327,93 +361,70 @@ export function getBestAudioFormatId(info: YtdlpVideoInfo): string {
   return audioOnly[0]?.format_id ?? "bestaudio"
 }
 
-export function buildFormatString(
-  formatId: string,
-  category: FormatCategory,
-  mergeFormat: "mp4" | "mkv" | "webm" = "mp4"
-): string {
-  if (category === "custom") return formatId
-  if (category === "audio") {
-    return formatId === "bestaudio" ? "bestaudio/best" : formatId
-  }
-  if (formatId.includes("+")) return formatId
-  return `${formatId}+bestaudio[ext=m4a]/bestaudio`
-}
-
 export const DEFAULT_OUTPUT_TEMPLATE = "%(title)s.%(ext)s"
 
 /** yt-dlp -o template: ASCII-safe while downloading (avoids ffmpeg failures on Windows). */
 export const INTERNAL_OUTPUT_TEMPLATE = "%(id)s.%(ext)s"
-
-/** Reliable 1080p MP4 + AAC — avoids 4K VP9→MP4 merge hangs on Windows. */
-export const DEFAULT_FORMAT =
-  "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=1080]+bestaudio[ext=m4a]/bestvideo[height<=1080]+bestaudio/best"
-
-export const PRESET_FORMATS = [
-  {
-    id: "1080p-mp4",
-    label: "1080p MP4 (recommended)",
-    value:
-      "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=1080]+bestaudio/best",
-    mergeOutputFormat: "mp4" as const,
-  },
-  {
-    id: "4k-sdr-mp4",
-    label: "4K SDR MP4 + AAC (~190 MB)",
-    value:
-      "bestvideo[height=2160][format_note!*=HDR]+bestaudio[ext=m4a]/bestvideo[height=2160]+bestaudio[ext=m4a]",
-    mergeOutputFormat: "mp4" as const,
-  },
-  {
-    id: "4k-hdr-mp4",
-    label: "4K HDR MP4 + AAC (~380 MB)",
-    value:
-      "bestvideo[height=2160][format_note*=HDR]+bestaudio[ext=m4a]/bestvideo[height=2160]+bestaudio[ext=m4a]",
-    mergeOutputFormat: "mp4" as const,
-  },
-  {
-    id: "4k-hdr-mkv",
-    label: "4K HDR MKV + AAC (~380 MB)",
-    value:
-      "bestvideo[height=2160][format_note*=HDR]+bestaudio[ext=m4a]/bestvideo+bestaudio[ext=m4a]/best",
-    mergeOutputFormat: "mkv" as const,
-  },
-  {
-    id: "best-mp4-aac",
-    label: "Best MP4 + AAC",
-    value:
-      "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best",
-  },
-  {
-    id: "720p",
-    label: "720p max",
-    value: "bestvideo[height<=720]+bestaudio[ext=m4a]/best",
-  },
-  {
-    id: "480p",
-    label: "480p max",
-    value: "bestvideo[height<=480]+bestaudio[ext=m4a]/best",
-  },
-  {
-    id: "audio-best",
-    label: "Audio only (best)",
-    value: "bestaudio/best",
-  },
-  {
-    id: "audio-mp3",
-    label: "Audio MP3",
-    value: "bestaudio --extract-audio --audio-format mp3",
-  },
-] as const
 
 export function parseUploadDate(yyyymmdd?: string): Date | null {
   if (!yyyymmdd || yyyymmdd.length !== 8) return null
   const year = Number.parseInt(yyyymmdd.slice(0, 4), 10)
   const month = Number.parseInt(yyyymmdd.slice(4, 6), 10) - 1
   const day = Number.parseInt(yyyymmdd.slice(6, 8), 10)
-  if (Number.isNaN(year) || Number.isNaN(month) || Number.isNaN(day)) return null
-  return new Date(year, month, day, 12, 0, 0)
+  if (Number.isNaN(year) || Number.isNaN(month) || Number.isNaN(day))
+    return null
+  const date = new Date(Date.UTC(year, month, day))
+  return Number.isNaN(date.getTime()) ? null : date
 }
+
+/** Reliable 1080p MP4 + AAC selector for direct streaming. */
+export const DEFAULT_FORMAT =
+  "bestvideo[height<=1080][vcodec^=avc1]+bestaudio[ext=m4a][acodec^=mp4a]/bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/bestvideo[height<=1080][ext=mp4]+bestaudio/best"
+
+export const PRESET_FORMATS = [
+  {
+    id: "1080p-mp4",
+    label: "1080p MP4 (recommended)",
+    value:
+      "bestvideo[height<=1080][vcodec^=avc1]+bestaudio[ext=m4a][acodec^=mp4a]/bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/bestvideo[height<=1080][ext=mp4]+bestaudio/best",
+    mergeOutputFormat: "mp4" as const,
+  },
+  {
+    id: "4k-sdr-mp4",
+    label: "4K SDR MP4 + AAC (~250 MB)",
+    value:
+      "bestvideo[height=2160][format_note!*=HDR][vcodec^=avc1]+bestaudio[ext=m4a][acodec^=mp4a]/bestvideo[height=2160][format_note!*=HDR][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height=2160][vcodec^=avc1]+bestaudio[ext=m4a]/best[height=2160][ext=mp4]",
+    mergeOutputFormat: "mp4" as const,
+  },
+  {
+    id: "4k-hdr-mkv",
+    label: "4K HDR MKV + best audio (~400 MB)",
+    value:
+      "bestvideo[height=2160][format_note*=HDR]+bestaudio/bestvideo[height=2160][format_note*=HDR]+bestaudio[ext=m4a]/best",
+    mergeOutputFormat: "mkv" as const,
+  },
+  {
+    id: "best-mp4-aac",
+    label: "Best MP4 + AAC (H.264)",
+    value:
+      "bestvideo[vcodec^=avc1]+bestaudio[ext=m4a][acodec^=mp4a]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/bestvideo[ext=mp4]+bestaudio/best",
+    mergeOutputFormat: "mp4" as const,
+  },
+  {
+    id: "720p",
+    label: "720p max MP4",
+    value:
+      "bestvideo[height<=720][vcodec^=avc1]+bestaudio[ext=m4a][acodec^=mp4a]/bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/best",
+    mergeOutputFormat: "mp4" as const,
+  },
+  {
+    id: "480p",
+    label: "480p max MP4",
+    value:
+      "bestvideo[height<=480][vcodec^=avc1]+bestaudio[ext=m4a][acodec^=mp4a]/bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[height<=480][ext=mp4]/best",
+    mergeOutputFormat: "mp4" as const,
+  },
+] as const
 
 const WINDOWS_INVALID_CHARS = /[<>:"/\\|?*\u0000-\u001f]/g
 
@@ -451,7 +462,10 @@ export function sanitizeWindowsFilename(title: string, ext: string): string {
 
   const maxBase = 200 - extension.length
   if (safe.length > maxBase) {
-    safe = safe.slice(0, maxBase).trim().replace(/[.\s]+$/g, "")
+    safe = safe
+      .slice(0, maxBase)
+      .trim()
+      .replace(/[.\s]+$/g, "")
   }
 
   return `${safe}${extension}`

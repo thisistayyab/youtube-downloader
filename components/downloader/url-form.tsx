@@ -70,7 +70,7 @@ export function UrlForm({
         </div>
         <p className="text-xs text-muted-foreground">
           {disabled
-            ? "Install yt-dlp and ffmpeg first — see the PC Setup guide."
+            ? "Downloads are unavailable until the server tools are ready."
             : "Supports videos, Shorts, and playlists. Uses yt-dlp "}
           {!disabled ? (
             <code className="rounded bg-muted px-1 py-0.5 font-mono text-[0.7rem]">

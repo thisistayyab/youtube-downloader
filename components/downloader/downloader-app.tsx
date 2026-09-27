@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 
 import { AdvancedOptions } from "@/components/downloader/advanced-options"
+import { CookieUpdaterModal } from "@/components/downloader/cookie-updater-modal"
 import { DownloadOptionsPanel } from "@/components/downloader/download-options-panel"
 import { DownloadQueue } from "@/components/downloader/download-queue"
 import { DownloaderHeader } from "@/components/downloader/header"
@@ -143,6 +144,7 @@ export function DownloaderApp({
   const [formatCategory, setFormatCategory] = useState<FormatCategory>("video")
   const [options, setOptions] = useState<DownloadOptions>(DEFAULT_OPTIONS)
   const [isStartingDownload, setIsStartingDownload] = useState(false)
+  const [isCookieModalOpen, setIsCookieModalOpen] = useState(false)
   const [jobs, setJobs] = useState<DownloadJob[]>(() => {
     if (typeof window === "undefined") return []
     try {
@@ -382,7 +384,7 @@ export function DownloaderApp({
 
   return (
     <div className="min-h-svh bg-gradient-to-b from-muted/30 to-background">
-      <DownloaderHeader />
+      <DownloaderHeader onOpenCookieModal={() => setIsCookieModalOpen(true)} />
 
       <main className="mx-auto max-w-6xl space-y-6 px-4 py-6 sm:px-6 sm:py-8">
         <section className="space-y-3 text-center sm:text-left">
@@ -413,6 +415,7 @@ export function DownloaderApp({
                   isLoading={isFetching}
                   error={fetchError}
                   disabled={!toolsReady}
+                  onOpenCookieModal={() => setIsCookieModalOpen(true)}
                 />
               </CardContent>
             </Card>
@@ -486,6 +489,15 @@ export function DownloaderApp({
           </div>
         </div>
       </main>
+
+      <CookieUpdaterModal
+        isOpen={isCookieModalOpen}
+        onClose={() => setIsCookieModalOpen(false)}
+        onCookiesUpdated={() => {
+          setFetchError(null)
+          if (url) void handleFetch(url)
+        }}
+      />
     </div>
   )
 }

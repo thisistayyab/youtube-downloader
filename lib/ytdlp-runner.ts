@@ -72,22 +72,33 @@ export function getFfmpegExecutable(): string {
   return fs.existsSync(candidate) ? candidate : location
 }
 
-/** Resolves cookies file from env var path, Render secret file, raw env string, or ./cookies.txt */
+/** Path to dynamic runtime session cookies updated via Web UI */
+export function getRuntimeCookiesPath(): string {
+  return path.join(getDownloadRoot(), "session-cookies.txt")
+}
+
+/** Resolves cookies file from runtime update, env var path, Render secret file, raw env string, or ./cookies.txt */
 export function getCookiesPath(): string | undefined {
-  // 1. Explicit path in environment variable
+  // 1. Dynamic in-app updated cookies (highest priority, updated via web UI)
+  const runtimePath = getRuntimeCookiesPath()
+  if (fs.existsSync(runtimePath)) {
+    return runtimePath
+  }
+
+  // 2. Explicit path in environment variable
   const envPath =
     process.env.COOKIES_PATH?.trim() || process.env.YTDLP_COOKIES_PATH?.trim()
   if (envPath && fs.existsSync(envPath)) {
     return path.resolve(envPath)
   }
 
-  // 2. Render Secret File default mount path (/etc/secrets/cookies.txt)
+  // 3. Render Secret File default mount path (/etc/secrets/cookies.txt)
   const renderSecretCookies = "/etc/secrets/cookies.txt"
   if (fs.existsSync(renderSecretCookies)) {
     return renderSecretCookies
   }
 
-  // 3. Raw cookies string passed via environment variable (for small/filtered cookies)
+  // 4. Raw cookies string passed via environment variable (for small/filtered cookies)
   const envContent =
     process.env.YOUTUBE_COOKIES?.trim() || process.env.YTDLP_COOKIES?.trim()
   if (envContent) {
@@ -102,7 +113,7 @@ export function getCookiesPath(): string | undefined {
     }
   }
 
-  // 4. Local cookies.txt in workspace root
+  // 5. Local cookies.txt in workspace root
   const localCookies = path.join(process.cwd(), "cookies.txt")
   if (fs.existsSync(localCookies)) {
     return localCookies

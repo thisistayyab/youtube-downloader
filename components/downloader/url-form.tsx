@@ -14,6 +14,7 @@ interface UrlFormProps {
   isLoading: boolean
   error: string | null
   disabled?: boolean
+  onOpenCookieModal?: () => void
 }
 
 export function UrlForm({
@@ -21,6 +22,7 @@ export function UrlForm({
   isLoading,
   error,
   disabled = false,
+  onOpenCookieModal,
 }: UrlFormProps) {
   const [url, setUrl] = useState("")
 
@@ -83,7 +85,20 @@ export function UrlForm({
       {error && (
         <Alert variant="destructive">
           <AlertCircle />
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription className="flex flex-col gap-2">
+            <span>{error}</span>
+            {/bot verification|cookies/i.test(error) && onOpenCookieModal && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="mt-1 w-fit border-destructive/40 bg-background/50 text-xs hover:bg-destructive/10"
+                onClick={onOpenCookieModal}
+              >
+                Update Cookies Now
+              </Button>
+            )}
+          </AlertDescription>
         </Alert>
       )}
     </form>

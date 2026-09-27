@@ -630,7 +630,22 @@ export function sanitizeYtdlpMessage(message: string): string {
       message
     )
   ) {
-    return "YouTube bot verification triggered: This cloud server IP was challenged by YouTube. Add a clean cookies.txt as a Secret File in Render Dashboard (Environment -> Secret Files) to authenticate."
+    const cookiesPath = getCookiesPath()
+    const cookiesExist = cookiesPath && fs.existsSync(cookiesPath)
+
+    if (!cookiesExist) {
+      return "YouTube bot verification: Render server has NO cookies file installed. Render's cloud IP is blocked by YouTube. You must add cookies.txt in Render Dashboard (Environment -> Secret Files)."
+    }
+
+    let sizeText = ""
+    try {
+      const bytes = fs.statSync(cookiesPath).size
+      sizeText = ` (${Math.round(bytes / 1024)} KB)`
+    } catch {
+      // ignore
+    }
+
+    return `YouTube bot verification: A cookies file exists at ${cookiesPath}${sizeText}, but YouTube rejected it as expired or invalid. Please export a fresh cookies.txt from a logged-in YouTube browser session.`
   }
 
   const lines = message

@@ -159,7 +159,7 @@ export function CookieUpdaterModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="relative w-full max-w-lg rounded-xl border bg-card p-6 text-card-foreground shadow-2xl">
+      <div className="relative flex max-h-[85vh] w-full max-w-lg flex-col rounded-xl border bg-card p-6 text-card-foreground shadow-2xl">
         <button
           onClick={onClose}
           className="absolute right-4 top-4 rounded-md p-1.5 text-muted-foreground transition hover:bg-muted hover:text-foreground"
@@ -168,7 +168,7 @@ export function CookieUpdaterModal({
           <X className="size-4" />
         </button>
 
-        <div className="flex items-center gap-2.5">
+        <div className="flex shrink-0 items-center gap-2.5">
           <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-red-600/10 text-red-600">
             <Cookie className="size-5" />
           </div>
@@ -182,34 +182,35 @@ export function CookieUpdaterModal({
           </div>
         </div>
 
-        {/* Status preview */}
-        <div className="mt-4 rounded-lg border bg-muted/40 p-3 text-xs">
-          <div className="flex items-center justify-between">
-            <span className="font-medium text-muted-foreground">
-              Current Server Status:
-            </span>
-            {isLoadingStatus ? (
-              <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
-            ) : status?.loaded ? (
-              <Badge variant="outline" className="border-emerald-600/40 text-emerald-600 dark:text-emerald-400">
-                <CheckCircle2 className="mr-1 size-3" />
-                Active ({status.source} · {Math.round(status.sizeBytes / 1024)} KB)
-              </Badge>
-            ) : (
-              <Badge variant="outline" className="border-amber-600/40 text-amber-600 dark:text-amber-400">
-                <XCircle className="mr-1 size-3" />
-                No Cookies Detected
-              </Badge>
+        {/* Scrollable content container */}
+        <div className="my-3 flex-1 overflow-y-auto pr-1 space-y-3">
+          {/* Status preview */}
+          <div className="rounded-lg border bg-muted/40 p-3 text-xs">
+            <div className="flex items-center justify-between">
+              <span className="font-medium text-muted-foreground">
+                Current Server Status:
+              </span>
+              {isLoadingStatus ? (
+                <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
+              ) : status?.loaded ? (
+                <Badge variant="outline" className="border-emerald-600/40 text-emerald-600 dark:text-emerald-400">
+                  <CheckCircle2 className="mr-1 size-3" />
+                  Active ({status.source} · {Math.round(status.sizeBytes / 1024)} KB)
+                </Badge>
+              ) : (
+                <Badge variant="outline" className="border-amber-600/40 text-amber-600 dark:text-amber-400">
+                  <XCircle className="mr-1 size-3" />
+                  No Cookies Detected
+                </Badge>
+              )}
+            </div>
+            {status?.source === "runtime" && (
+              <p className="mt-1 text-[0.7rem] text-muted-foreground">
+                In-app session is active. You can clear or overwrite it below.
+              </p>
             )}
           </div>
-          {status?.source === "runtime" && (
-            <p className="mt-1 text-[0.7rem] text-muted-foreground">
-              In-app session is active. You can clear or overwrite it below.
-            </p>
-          )}
-        </div>
 
-        <div className="mt-4 space-y-3">
           {status?.requiresSecret && (
             <div className="space-y-1.5">
               <Label htmlFor="cookie-secret" className="text-xs">
@@ -244,11 +245,11 @@ export function CookieUpdaterModal({
             </div>
             <Textarea
               id="cookie-textarea"
-              rows={6}
+              rows={5}
               placeholder="# Netscape HTTP Cookie File&#10;.youtube.com TRUE / TRUE ..."
               value={cookiesText}
               onChange={(e) => setCookiesText(e.target.value)}
-              className="font-mono text-[0.75rem] leading-relaxed"
+              className="h-36 max-h-48 resize-none overflow-y-auto font-mono text-[0.75rem] leading-relaxed"
             />
             <p className="text-[0.7rem] text-muted-foreground">
               Export fresh cookies with the <strong>Get cookies.txt LOCALLY</strong> extension while logged into YouTube.
@@ -256,7 +257,8 @@ export function CookieUpdaterModal({
           </div>
         </div>
 
-        <div className="mt-5 flex items-center justify-between gap-2 border-t pt-4">
+        {/* Sticky footer */}
+        <div className="mt-auto flex shrink-0 items-center justify-between gap-2 border-t pt-4">
           <div>
             {status?.source === "runtime" && (
               <Button

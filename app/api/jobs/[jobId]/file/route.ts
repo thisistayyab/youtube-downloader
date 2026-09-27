@@ -6,10 +6,12 @@ import { NextResponse } from "next/server"
 
 import { isPathInside, resolveJobFile } from "@/lib/job-manifest"
 import { getJob, markJobDelivered, removeJob } from "@/lib/job-store"
+import { verifyRequestAuth } from "@/lib/auth"
 import { buildContentDisposition } from "@/lib/ytdlp-utils"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
+
 
 const MIME_TYPES: Record<string, string> = {
   ".mp4": "video/mp4",
@@ -121,9 +123,16 @@ function resolveExistingFile(
 }
 
 export async function HEAD(
-  _request: Request,
+  request: Request,
   context: { params: Promise<{ jobId: string }> }
 ) {
+  if (!verifyRequestAuth(request)) {
+    return NextResponse.json(
+      { error: "Authentication required" },
+      { status: 401 }
+    )
+  }
+
   const { jobId } = await context.params
   const file = resolveExistingFile(jobId)
   if (!file.ok) return file.response
@@ -143,6 +152,13 @@ export async function GET(
   request: Request,
   context: { params: Promise<{ jobId: string }> }
 ) {
+  if (!verifyRequestAuth(request)) {
+    return NextResponse.json(
+      { error: "Authentication required" },
+      { status: 401 }
+    )
+  }
+
   const { jobId } = await context.params
   const file = resolveExistingFile(jobId)
   if (!file.ok) return file.response

@@ -129,8 +129,10 @@ async function saveJobFile(job: DownloadJob): Promise<string | null> {
 
 export function DownloaderApp({
   capabilities,
+  onLock,
 }: {
   capabilities: AppCapabilities
+  onLock?: () => void
 }) {
   useToolSetupToasts(capabilities)
 
@@ -384,7 +386,12 @@ export function DownloaderApp({
 
   return (
     <div className="min-h-svh bg-gradient-to-b from-muted/30 to-background">
-      <DownloaderHeader onOpenCookieModal={() => setIsCookieModalOpen(true)} />
+      <DownloaderHeader
+        onOpenCookieModal={() => setIsCookieModalOpen(true)}
+        isLocked={capabilities.auth?.locked}
+        isAuthenticated={capabilities.auth?.authenticated}
+        onLock={onLock}
+      />
 
       <main className="mx-auto max-w-6xl space-y-6 px-4 py-6 sm:px-6 sm:py-8">
         <section className="space-y-3 text-center sm:text-left">

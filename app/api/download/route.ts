@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 
+import { verifyRequestAuth } from "@/lib/auth"
 import {
   checkRateLimit,
   getClientIp,
@@ -24,6 +25,13 @@ export const dynamic = "force-dynamic"
 export const maxDuration = 600
 
 export async function POST(request: Request) {
+  if (!verifyRequestAuth(request)) {
+    return NextResponse.json(
+      { error: "Access denied. Application is password protected." },
+      { status: 401 }
+    )
+  }
+
   try {
     const rateLimit = checkRateLimit(
       `download:${getClientIp(request)}`,

@@ -1,9 +1,10 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 
 import { DownloaderApp } from "@/components/downloader/downloader-app"
 import { DownloaderHeader } from "@/components/downloader/header"
+import { LockScreen } from "@/components/downloader/lock-screen"
 import { Skeleton } from "@/components/ui/skeleton"
 import type { AppCapabilities } from "@/lib/capabilities"
 
@@ -12,14 +13,16 @@ const FALLBACK_CAPABILITIES: AppCapabilities = {
   message: "Could not reach the server. Refresh the page to try again.",
   ytdlp: { available: false, error: "Server unreachable" },
   ffmpeg: { available: false, error: "Server unreachable" },
+  auth: {
+    locked: false,
+    authenticated: true,
+  },
 }
 
 export function HomePage() {
   const [capabilities, setCapabilities] = useState<AppCapabilities | null>(null)
 
-  useEffect(() => {
-    let cancelled = false
-
+  const refreshCapabilities = useCallback(() => {
     fetch("/api/capabilities", { cache: "no-store" })
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
@@ -27,13 +30,13 @@ export function HomePage() {
       })
       .catch(() => FALLBACK_CAPABILITIES)
       .then((caps) => {
-        if (!cancelled) setCapabilities(caps)
+        setCapabilities(caps)
       })
-
-    return () => {
-      cancelled = true
-    }
   }, [])
+
+  useEffect(() => {
+    refreshCapabilities()
+  }, [refreshCapabilities])
 
   if (!capabilities) {
     return (
@@ -49,5 +52,15 @@ export function HomePage() {
     )
   }
 
-  return <DownloaderApp capabilities={capabilities} />
+  if (capabilities.auth?.locked && !capabilities.auth?.authenticated) {
+    return <LockScreen onUnlocked={refreshCapabilities} />
+  }
+
+  return (
+    <DownloaderApp
+      capabilities={capabilities}
+      onLock={refreshCapabilities}
+    />
+  )
 }
+

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 
+import { verifyRequestAuth } from "@/lib/auth"
 import { checkRateLimit, getClientIp, getInfoRateLimit } from "@/lib/rate-limit"
 import type { FetchInfoRequest } from "@/lib/ytdlp-types"
 import { isValidYoutubeUrl } from "@/lib/ytdlp-utils"
@@ -9,6 +10,13 @@ export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
 export async function POST(request: Request) {
+  if (!verifyRequestAuth(request)) {
+    return NextResponse.json(
+      { error: "Access denied. Application is password protected." },
+      { status: 401 }
+    )
+  }
+
   try {
     const limit = checkRateLimit(
       `info:${getClientIp(request)}`,

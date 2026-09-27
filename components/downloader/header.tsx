@@ -1,8 +1,10 @@
 "use client"
 
-import { Cookie, Moon, Play, Sun } from "lucide-react"
+import { Cookie, Lock, Moon, Play, Sun } from "lucide-react"
 import Link from "next/link"
 import { useTheme } from "next-themes"
+import { useState } from "react"
+import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -13,10 +15,32 @@ import {
 
 interface DownloaderHeaderProps {
   onOpenCookieModal?: () => void
+  isLocked?: boolean
+  isAuthenticated?: boolean
+  onLock?: () => void
 }
 
-export function DownloaderHeader({ onOpenCookieModal }: DownloaderHeaderProps) {
+export function DownloaderHeader({
+  onOpenCookieModal,
+  isLocked,
+  isAuthenticated,
+  onLock,
+}: DownloaderHeaderProps) {
   const { resolvedTheme, setTheme } = useTheme()
+  const [isLocking, setIsLocking] = useState(false)
+
+  const handleLogout = async () => {
+    setIsLocking(true)
+    try {
+      await fetch("/api/auth/logout", { method: "POST" })
+      toast.info("Session locked")
+      onLock?.()
+    } catch {
+      // ignore
+    } finally {
+      setIsLocking(false)
+    }
+  }
 
   return (
     <header className="border-b bg-background/80 backdrop-blur-sm">
@@ -50,6 +74,24 @@ export function DownloaderHeader({ onOpenCookieModal }: DownloaderHeaderProps) {
                 </Button>
               </TooltipTrigger>
               <TooltipContent>Update or view YouTube session cookies</TooltipContent>
+            </Tooltip>
+          )}
+
+          {isLocked && isAuthenticated && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={isLocking}
+                  onClick={handleLogout}
+                  className="h-8 gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground hover:border-red-500/50"
+                >
+                  <Lock className="size-3.5 text-amber-500" />
+                  <span className="hidden sm:inline">Lock</span>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Lock downloader session</TooltipContent>
             </Tooltip>
           )}
 

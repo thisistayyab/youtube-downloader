@@ -1,3 +1,4 @@
+import { isAppLocked, verifyRequestAuth } from "./auth"
 import {
   ensureFfmpegAvailable,
   ensureYtdlpAvailable,
@@ -15,6 +16,10 @@ export interface AppCapabilities {
   message: string
   ytdlp: ToolStatus
   ffmpeg: ToolStatus
+  auth: {
+    locked: boolean
+    authenticated: boolean
+  }
 }
 
 async function checkYtdlp(): Promise<ToolStatus> {
@@ -47,8 +52,13 @@ async function checkFfmpeg(): Promise<ToolStatus> {
   }
 }
 
-export async function getAppCapabilities(): Promise<AppCapabilities> {
+export async function getAppCapabilities(
+  request?: Request
+): Promise<AppCapabilities> {
   const [ytdlp, ffmpeg] = await Promise.all([checkYtdlp(), checkFfmpeg()])
+
+  const locked = isAppLocked()
+  const authenticated = !locked || (request ? verifyRequestAuth(request) : false)
 
   const downloadsAvailable = ytdlp.available && ffmpeg.available
 
@@ -59,5 +69,9 @@ export async function getAppCapabilities(): Promise<AppCapabilities> {
       : "Downloads are disabled until yt-dlp and ffmpeg are available on this server.",
     ytdlp,
     ffmpeg,
+    auth: {
+      locked,
+      authenticated,
+    },
   }
 }

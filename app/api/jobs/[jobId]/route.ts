@@ -1,14 +1,22 @@
 import { NextResponse } from "next/server"
 
+import { verifyRequestAuth } from "@/lib/auth"
 import { getPublicJob, getJob, removeJob } from "@/lib/job-store"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
 export async function GET(
-  _request: Request,
+  request: Request,
   context: { params: Promise<{ jobId: string }> }
 ) {
+  if (!verifyRequestAuth(request)) {
+    return NextResponse.json(
+      { error: "Access denied. Application is password protected." },
+      { status: 401 }
+    )
+  }
+
   const { jobId } = await context.params
   const job = getPublicJob(jobId)
 
@@ -20,9 +28,16 @@ export async function GET(
 }
 
 export async function DELETE(
-  _request: Request,
+  request: Request,
   context: { params: Promise<{ jobId: string }> }
 ) {
+  if (!verifyRequestAuth(request)) {
+    return NextResponse.json(
+      { error: "Access denied. Application is password protected." },
+      { status: 401 }
+    )
+  }
+
   const { jobId } = await context.params
 
   if (!getJob(jobId)) {
